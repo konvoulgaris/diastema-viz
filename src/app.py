@@ -2,11 +2,12 @@ import os
 import json
 import pandas as pd
 
-from flask import Flask, request
+from flask import Flask, request, render_template_string
 from autoviz.AutoViz_Class import AutoViz_Class
 from pymongo import MongoClient
 from minio import Minio
 from io import BytesIO
+from uuid import uuid4
 
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
@@ -31,7 +32,7 @@ images = dict()
 def index():
     data = json.loads(request.data)
 
-    if not ("minio-input" in data):
+    if not ("minio-input" in data or "minio-output" in data):
         return "Missing fields in request data", 400
 
     bucket, file = data["minio-input"].split("/", 1)
@@ -39,15 +40,26 @@ def index():
     buffer = BytesIO(response.read())
     buffer.seek(0)
     df = pd.read_csv(buffer)
+    plot_dir = f"/tmp/{uuid4().hex}"
+    plot_file = f"{plot_dir}/AutoViz/timeseries_plots.html"
 
-    chart = av.AutoViz(
+    av.AutoViz(
         filename="",
+        sep=",",
+        depVar="",
         dfte=df,
+        header=0,
+        verbose=2,
+        lowess=False,
+        chart_format="html",
+        max_rows_analyzed=150000,
+        max_cols_analyzed=30,
+        save_plot_dir=plot_dir,
     )
 
-    print(chart)
-
-    return "ok"
+    with open(plot_file, "r") as f:
+        plot = f.read()
+        return render_template_string(plot)
 
 
 @app.errorhandler(Exception)
