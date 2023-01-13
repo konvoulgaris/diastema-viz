@@ -24,24 +24,22 @@ db = MongoClient(MONGO_HOST, MONGO_PORT)
 s3 = Minio(f"{MINIO_HOST}:{MINIO_PORT}", MINIO_USER, MINIO_PASS, secure=False)
 av = AutoViz_Class()
 
-# TODO: Temp thing, remove later
-images = dict()
-
 
 @app.route("/", methods=["POST"])
 def index():
     data = json.loads(request.data)
 
-    if not ("minio-input" in data or "minio-output" in data):
+    if not ("minio-input" in data and "minio-output" in data):
         return "Missing fields in request data", 400
 
-    bucket, file = data["minio-input"].split("/", 1)
-    response = s3.get_object(bucket, file)
+    bucket, filename = data["minio-input"].split("/", 1)
+    response = s3.get_object(bucket, filename)
     buffer = BytesIO(response.read())
     buffer.seek(0)
     df = pd.read_csv(buffer)
     plot_dir = f"/tmp/{uuid4().hex}"
-    plot_file = f"{plot_dir}/AutoViz/timeseries_plots.html"
+
+    print("Saving plot to", plot_dir)
 
     av.AutoViz(
         filename="",
@@ -57,10 +55,22 @@ def index():
         save_plot_dir=plot_dir,
     )
 
-    with open(plot_file, "r") as f:
-        plot = f.read()
-        return render_template_string(plot)
+    plot_av_dir = os.path.join(plot_dir, "AutoViz")
 
+    for f in os.listdir(plot_av_dir):
+        if not f.endswith(".html"):
+            continue
+
+        with open(os.path.join(plot_av_dir, f), "r") as plot_file:
+            plot = plot_file.read().encode("utf-8")
+            plot_size = len(plot)
+            plot = BytesIO(plot)
+            plot.seek(0)
+            bucket, filename = data["minio-output"].split("/", 1)
+            s3.put_object(bucket, f"{filename}/visualization_{f}", plot,
+                          plot_size)
+
+    return "OK", 200
 
 @app.errorhandler(Exception)
 def exception_handler(ex: Exception):
